@@ -134,24 +134,63 @@ for result in response["retrievalResults"]:
 
 ### Abfrage über MCP (Claude Desktop / Claude Code)
 
-Alternativ kann der [AWS Bedrock KB Retrieval MCP-Server](https://awslabs.github.io/mcp/servers/bedrock-kb-retrieval-mcp-server) verwendet werden. Damit steht die Wissensdatenbank als MCP-Tool bereit — kein eigener API-Code nötig.
+Der MCP-Server ist zentral auf AWS Lambda gehostet — kein lokales Tooling nötig. Clients authentifizieren sich mit einem API-Key im `Authorization`-Header.
 
-Konfiguration in `~/.claude/settings.json` (oder Claude Desktop):
+**API-Key abrufen** (einmalig, erfordert AWS-Zugriff):
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id KernpunktKbMcpApiKey-dev \
+  --query SecretString --output text \
+  --profile kt-kb-deployer
+```
+
+**URL abrufen:**
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name KernpunktKbDev \
+  --query "Stacks[0].Outputs[?OutputKey=='McpServerUrl'].OutputValue" \
+  --output text \
+  --profile kt-kb-deployer
+```
+
+**Konfiguration für Claude Code** (`~/.claude/settings.json`):
 
 ```json
 {
   "mcpServers": {
-    "bedrock-kb": {
-      "command": "uvx",
-      "args": ["awslabs.bedrock-kb-retrieval-mcp-server"],
-      "env": {
-        "AWS_REGION": "eu-central-1",
-        "KNOWLEDGE_BASE_IDS": "I3WHA5QNNJ"
+    "kernpunkt-kb": {
+      "type": "http",
+      "url": "<McpServerUrl>",
+      "headers": {
+        "Authorization": "Bearer <api-key>"
       }
     }
   }
 }
 ```
+
+**Konfiguration für Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+Claude Desktop unterstützt den HTTP-Transport aktuell nicht nativ. Als Workaround liegt im Repository ein minimales Python-Skript (`mcp-server/stdio_proxy.py`), das als lokale stdio↔HTTP-Brücke fungiert — es leitet jede MCP-Nachricht per HTTP POST an den Lambda-Server weiter. Das Skript benötigt keine externen Abhängigkeiten (nur Python stdlib).
+
+```json
+{
+  "mcpServers": {
+    "kernpunkt-kb": {
+      "command": "/Users/<username>/.pyenv/versions/<version>/bin/python3",
+      "args": ["/path/to/kt-knowledge-base/mcp-server/stdio_proxy.py"],
+      "env": {
+        "MCP_API_KEY": "<api-key>",
+        "MCP_SERVER_URL": "<McpServerUrl>"
+      }
+    }
+  }
+}
+```
+
+> **Hinweis:** Claude Desktop startet MCP-Server mit einem eingeschränkten `PATH`. Daher muss der vollständige Pfad zur Python-Binary angegeben werden (z.B. via `pyenv which python3`).
 
 ---
 
