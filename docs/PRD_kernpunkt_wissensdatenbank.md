@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.2 |
+| **Status** | Draft v0.3 |
 | **Erstellt am** | 16. April 2026 |
 | **Erstellt von** | Jan Eickmann |
 | **Letzte Änderung** | 22. April 2026 |
@@ -145,7 +145,13 @@ Die Wissensdatenbank stellt einen einheitlichen Zugangs-Layer bereit, über den 
 - **Interface**: AWS Bedrock Knowledge Base API (`Retrieve`) via REST/SDK
 - **Antwortformat**: JSON mit Quellenangabe (Dokument, Repository, Chunk)
 
-**Zugang über MCP**: Als Alternative zur direkten API-Integration kann der Zugriff über den [AWS Bedrock KB Retrieval MCP-Server](https://awslabs.github.io/mcp/servers/bedrock-kb-retrieval-mcp-server) erfolgen. Dieser stellt die Knowledge Base als MCP-Tool bereit und ermöglicht MCP-kompatiblen Agenten (z.B. Claude Desktop, Claude Code) die direkte Nutzung ohne eigene API-Integration. Dieser Zugangsweg ist besonders relevant für den Dev-Assistenten und den Konzept/UX-Agenten, die typischerweise in MCP-fähigen Umgebungen betrieben werden.
+**Zugang über MCP**: Als Alternative zur direkten API-Integration steht ein **zentral gehosteter MCP-Server** bereit. Dieser ist als AWS Lambda-Funktion mit Lambda Function URL implementiert und exponiert die Wissensdatenbank als MCP-Tool (`retrieve_from_knowledge_bases`). MCP-kompatible Clients (z.B. Claude Desktop, Claude Code) können sich direkt damit verbinden – ohne eigene API-Integration oder lokale Tooling-Installation.
+
+- **Authentifizierung**: API-Key via `Authorization: Bearer`-Header (Key wird automatisch bei Deployment generiert und in AWS Secrets Manager gespeichert)
+- **Skalierung**: Scale-to-zero – keine Kosten im Leerlauf
+- **Protokoll**: MCP Streamable HTTP Transport (JSON-RPC 2.0 über HTTP POST)
+
+Dieser Zugangsweg ist besonders relevant für den Dev-Assistenten und den Konzept/UX-Agenten, die typischerweise in MCP-fähigen Umgebungen betrieben werden.
 
 #### F-05: Quellenangabe im Retrieval-Ergebnis
 
@@ -345,9 +351,21 @@ GitHub Repositories
 #### 5.2.3 Zugangs-Layer für Agenten
 
 - **API**: AWS Bedrock Knowledge Base API (`bedrock-agent-runtime`) – ausschließlich `Retrieve`
-- **MCP**: Alternativ via AWS Bedrock KB Retrieval MCP-Server (siehe F-04)
-- **Authentifizierung**: AWS IAM Roles (Least-Privilege-Prinzip)
+- **MCP**: Zentral gehosteter MCP-Server (AWS Lambda + Function URL) – siehe F-04
+- **Authentifizierung API**: AWS IAM Roles (Least-Privilege-Prinzip)
+- **Authentifizierung MCP**: API-Key via `Authorization: Bearer`-Header
 - **Metadaten-Filter**: Agenten können nach technischen Metadaten (`source_repo`) sowie beliebigen Frontmatter-Feldern filtern
+
+#### 5.2.4 MCP-Server
+
+| Komponente | Konfiguration |
+|---|---|
+| **Laufzeit** | AWS Lambda (Python 3.12) |
+| **Zugang** | Lambda Function URL (HTTPS) |
+| **Authentifizierung** | API-Key in AWS Secrets Manager, validiert im Handler |
+| **Protokoll** | MCP Streamable HTTP Transport (JSON-RPC 2.0 via HTTP POST) |
+| **Tool** | `retrieve_from_knowledge_bases` mit optionalem `source_repo`-Filter |
+| **Skalierung** | Scale-to-zero (keine Kosten im Leerlauf) |
 
 ### 5.3 Infrastruktur & Deployment
 
@@ -371,6 +389,7 @@ Der CDK-Stack umfasst mindestens:
 - Amazon S3 Vectors (Vector Bucket + Index für die Vektorsuche)
 - IAM Roles für Agenten-Zugriff (Least-Privilege)
 - IAM Role für den S3-Sync aus GitHub Actions
+- MCP-Server (Lambda-Funktion + Function URL + API-Key in Secrets Manager)
 - CloudWatch Log Groups und Alarme
 
 ### 5.4 Datenfluss im Retrieval
@@ -462,6 +481,8 @@ Folgende Themen sind **explizit nicht** Teil dieses Projekts:
 | **Chunking** | Aufteilung von Dokumenten in kleinere Abschnitte für das Embedding |
 | **Embedding** | Vektorielle Repräsentation von Text für semantische Suche |
 | **Ingestion** | Prozess des Einlesens, Aufbereitens und Einspeisens von Dokumenten in die Wissensdatenbank |
+| **MCP** | Model Context Protocol – offenes Protokoll zur Integration von Tools und Datenquellen in KI-Agenten |
+| **MCP-Server** | Zentral gehosteter Lambda-basierter Server, der die Wissensdatenbank als MCP-Tool exponiert |
 | **RAG** | Retrieval-Augmented Generation – KI-Ansatz, der LLMs mit externer Wissensbasis anreichert |
 | **Retrieval** | Abruf semantisch relevanter Dokumente aus der Vektordatenbank |
 | **Vector Store** | Datenbank zur Speicherung und Abfrage von Embedding-Vektoren (hier: Amazon S3 Vectors) |
