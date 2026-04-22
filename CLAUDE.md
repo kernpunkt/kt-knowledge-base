@@ -101,7 +101,7 @@ In the consumer repo, create `.github/workflows/sync-to-kb.yml` and set these re
 
 Then reference the reusable action:
 ```yaml
-uses: kernpunkt/kt-knowledge-base/.github/action.yml@main
+uses: kernpunkt/kt-knowledge-base/.github/actions/sync-to-kb@main
 ```
 
 ## Key Technical Notes

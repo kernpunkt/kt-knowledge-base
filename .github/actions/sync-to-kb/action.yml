@@ -84,7 +84,7 @@ runs:
     - name: Generate metadata sidecar files
       shell: bash
       run: |
-        python "${{ github.action_path }}/../../scripts/enrich-metadata.py" \
+        python "${{ github.action_path }}/../../../scripts/enrich-metadata.py" \
           --repo-name "${{ github.repository }}" \
           --root-dir "${{ github.workspace }}" \
           --output-dir "$STAGING_DIR"

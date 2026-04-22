@@ -46,7 +46,7 @@ jobs:
           fetch-depth: 0
 
       - name: Sync to kernpunkt Knowledge Base
-        uses: kernpunkt/kt-knowledge-base/.github/action.yml@main
+        uses: kernpunkt/kt-knowledge-base/.github/actions/sync-to-kb@main
         with:
           aws-role-arn: ${{ vars.KB_GITHUB_ACTIONS_ROLE_ARN }}
           s3-bucket: ${{ vars.KB_S3_BUCKET }}
