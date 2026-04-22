@@ -21,7 +21,7 @@ kt-knowledge-base/
 │   │   ├── knowledge-base-stack.ts
 │   │   └── constructs/
 │   │       ├── document-bucket.ts
-│   │       ├── opensearch-collection.ts
+│   │       ├── s3-vectors-store.ts
 │   │       ├── bedrock-knowledge-base.ts
 │   │       ├── iam-roles.ts
 │   │       └── monitoring.ts
@@ -82,7 +82,7 @@ Amazon S3 (kernpunkt-kb-documents-{env})
 AWS Bedrock Knowledge Base
   - Embedding: amazon.titan-embed-text-v2:0 (1024 dims)
   - Chunking: Semantic (maxTokens: 300)
-  - Vector store: OpenSearch Serverless (VECTORSEARCH)
+  - Vector store: Amazon S3 Vectors (float32, 1024 dims, cosine)
     │
     ▼ Retrieve API
 AI Agents (Dev assistant, PM agent, UX/Concept agent)
@@ -106,8 +106,8 @@ uses: kernpunkt/kt-knowledge-base/.github/actions/sync-to-kb@main
 
 ## Key Technical Notes
 
-- **L1 CDK constructs** are used for Bedrock and OpenSearch Serverless (no stable L2 yet)
-- **AOSS policy order matters**: encryption policy and network policy must be created before the collection
+- **L1 CDK constructs** are used for Bedrock and S3 Vectors (no stable L2 yet)
+- **IAM dependency**: Bedrock validates S3 Vectors permissions at KB creation time — the KB resource has an explicit `DependsOn` the IAM policy to avoid race conditions
 - **Metadata sidecar format**: `{ "metadataAttributes": { "source_repo": "...", ... } }` — file named `<doc>.metadata.json` in same S3 prefix
 - **OIDC trust**: any repo in the `kernpunkt` GitHub org on `main`/`master` can sync — no per-repo AWS config needed
 - **Tags** (frontmatter lists) are serialized as comma-separated strings because Bedrock metadata only supports primitives

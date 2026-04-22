@@ -3,10 +3,10 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1 |
+| **Status** | Draft v0.2 |
 | **Erstellt am** | 16. April 2026 |
 | **Erstellt von** | Jan Eickmann |
-| **Letzte Änderung** | 16. April 2026 |
+| **Letzte Änderung** | 22. April 2026 |
 
 ---
 
@@ -298,7 +298,7 @@ GitHub Repositories
 │                                         │
 │  ┌──────────────────────────────────┐   │
 │  │  Vector Store                    │   │
-│  │  (OpenSearch Serverless)         │   │
+│  │  (Amazon S3 Vectors)             │   │
 │  └──────────────────────────────────┘   │
 └─────────────────┬───────────────────────┘
                   │
@@ -339,7 +339,7 @@ GitHub Repositories
 | **Data Source** | S3-Bucket (automatischer Sync) |
 | **Chunking** | Semantic Chunking (Bedrock-native) |
 | **Embedding Model** | `amazon.titan-embed-text-v2:0` |
-| **Vector Store** | Amazon OpenSearch Serverless (Collection Type: Vector Search) |
+| **Vector Store** | Amazon S3 Vectors (Index-Typ: float32, 1024 Dimensionen, Cosine Distance) |
 | **Foundation Model** | Nicht Teil der Knowledge Base – Antwortgenerierung obliegt dem jeweiligen Agenten |
 
 #### 5.2.3 Zugangs-Layer für Agenten
@@ -368,7 +368,7 @@ Der CDK-Stack umfasst mindestens:
 
 - S3-Bucket (Dokumenten-Staging, inkl. Bucket-Policy und Versionierung)
 - AWS Bedrock Knowledge Base (inkl. Data Source-Konfiguration auf S3)
-- OpenSearch Serverless Collection (Vector Search)
+- Amazon S3 Vectors (Vector Bucket + Index für die Vektorsuche)
 - IAM Roles für Agenten-Zugriff (Least-Privilege)
 - IAM Role für den S3-Sync aus GitHub Actions
 - CloudWatch Log Groups und Alarme
@@ -385,7 +385,7 @@ Bedrock Knowledge Base API
 Anfrage wird eingebettet (Titan Embeddings)
          │
          ▼
-Vektorsuche in OpenSearch Serverless
+Vektorsuche in Amazon S3 Vectors
          │
          ▼
 Top-K relevante Chunks + Metadaten
@@ -464,7 +464,7 @@ Folgende Themen sind **explizit nicht** Teil dieses Projekts:
 | **Ingestion** | Prozess des Einlesens, Aufbereitens und Einspeisens von Dokumenten in die Wissensdatenbank |
 | **RAG** | Retrieval-Augmented Generation – KI-Ansatz, der LLMs mit externer Wissensbasis anreichert |
 | **Retrieval** | Abruf semantisch relevanter Dokumente aus der Vektordatenbank |
-| **Vector Store** | Datenbank zur Speicherung und Abfrage von Embedding-Vektoren (hier: OpenSearch Serverless) |
+| **Vector Store** | Datenbank zur Speicherung und Abfrage von Embedding-Vektoren (hier: Amazon S3 Vectors) |
 
 ---
 
