@@ -1,0 +1,119 @@
+name: 'Sync to kernpunkt Knowledge Base'
+description: >
+  Syncs Markdown and image files from a GitHub repository to the kernpunkt
+  central knowledge base on AWS Bedrock. Generates metadata sidecar files,
+  syncs to S3, and triggers a Bedrock ingestion job.
+
+inputs:
+  aws-role-arn:
+    description: 'ARN of the GitHub Actions IAM role (OIDC). Set as KB_GITHUB_ACTIONS_ROLE_ARN in repo variables.'
+    required: true
+  s3-bucket:
+    description: 'Target S3 bucket name. Set as KB_S3_BUCKET in repo variables.'
+    required: true
+  knowledge-base-id:
+    description: 'Bedrock Knowledge Base ID. Set as KB_KNOWLEDGE_BASE_ID in repo variables.'
+    required: true
+  data-source-id:
+    description: 'Bedrock Knowledge Base Data Source ID. Set as KB_DATA_SOURCE_ID in repo variables.'
+    required: true
+  repo-prefix:
+    description: >
+      S3 key prefix for this repo (e.g. "my-project"). Defaults to the
+      slugified repository name (owner/repo → owner-repo).
+    required: false
+    default: ''
+  aws-region:
+    description: 'AWS region where the knowledge base is deployed.'
+    required: false
+    default: 'eu-central-1'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install PyYAML
+      shell: bash
+      run: pip install --quiet pyyaml
+
+    - name: Determine S3 prefix
+      id: prefix
+      shell: bash
+      run: |
+        PREFIX="${{ inputs.repo-prefix }}"
+        if [ -z "$PREFIX" ]; then
+          # Slugify: replace / and . with -
+          PREFIX=$(echo "${{ github.repository }}" | tr '/.' '-')
+        fi
+        echo "value=$PREFIX" >> "$GITHUB_OUTPUT"
+
+    - name: Prepare staging directory
+      shell: bash
+      run: |
+        STAGING="$RUNNER_TEMP/kb-staging"
+        mkdir -p "$STAGING"
+        echo "STAGING_DIR=$STAGING" >> "$GITHUB_ENV"
+
+    - name: Copy supported files to staging directory
+      shell: bash
+      run: |
+        # Use rsync to copy only supported file types while preserving directory structure.
+        # This avoids aws s3 sync include/exclude ordering pitfalls.
+        rsync -a \
+          --include="*/" \
+          --include="*.md" \
+          --include="*.png" \
+          --include="*.jpg" \
+          --include="*.jpeg" \
+          --include="*.svg" \
+          --exclude="*" \
+          --exclude-from=<(echo -e "node_modules/\n.git/\ndist/\nbuild/\ncdk.out/\n.env\n.env.*") \
+          "${{ github.workspace }}/" \
+          "$STAGING_DIR/"
+
+    - name: Generate metadata sidecar files
+      shell: bash
+      run: |
+        python "${{ github.action_path }}/../../scripts/enrich-metadata.py" \
+          --repo-name "${{ github.repository }}" \
+          --root-dir "${{ github.workspace }}" \
+          --output-dir "$STAGING_DIR"
+
+    - name: Sync to S3
+      shell: bash
+      run: |
+        aws s3 sync "$STAGING_DIR/" \
+          "s3://${{ inputs.s3-bucket }}/${{ steps.prefix.outputs.value }}/" \
+          --delete \
+          --region "${{ inputs.aws-region }}"
+
+    - name: Start Bedrock ingestion job
+      shell: bash
+      run: |
+        JOB_ID=$(aws bedrock-agent start-ingestion-job \
+          --knowledge-base-id "${{ inputs.knowledge-base-id }}" \
+          --data-source-id "${{ inputs.data-source-id }}" \
+          --region "${{ inputs.aws-region }}" \
+          --query 'ingestionJob.ingestionJobId' \
+          --output text)
+        echo "Ingestion job started: $JOB_ID"
+        echo "INGESTION_JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+
+    - name: Report ingestion job URL
+      shell: bash
+      run: |
+        echo "### Knowledge Base Sync" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "- **Prefix**: \`${{ steps.prefix.outputs.value }}\`" >> "$GITHUB_STEP_SUMMARY"
+        echo "- **Ingestion Job ID**: \`$INGESTION_JOB_ID\`" >> "$GITHUB_STEP_SUMMARY"
+        echo "- **Status**: Ingestion started (completes within ~1 hour)" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,160 @@
+name: Deploy Infrastructure
+
+# Deploys the CDK stacks for the kernpunkt knowledge base.
+# Triggered automatically on changes to infra/, or manually for a specific environment.
+#
+# Required repository variables:
+#   CDK_DEPLOY_ROLE_ARN_DEV   — IAM role ARN with CDK deploy permissions in the dev account
+#   CDK_DEPLOY_ROLE_ARN_PROD  — IAM role ARN with CDK deploy permissions in the prod account
+#   KB_DEV_ACCOUNT            — AWS account ID for the dev environment
+#   KB_PROD_ACCOUNT           — AWS account ID for the production environment
+#
+# Optional repository variables:
+#   KB_ALARM_EMAIL            — Email address for CloudWatch alarm notifications
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        type: choice
+        options:
+          - dev
+          - production
+        default: dev
+      action:
+        description: 'CDK action'
+        type: choice
+        options:
+          - deploy
+          - diff
+          - synth
+        default: diff
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ── Synth + Diff (always runs, even on auto-push) ───────────────────────────
+  synth-and-diff:
+    name: Synth & Diff
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'deploy')
+    environment: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: infra
+
+      - name: Build TypeScript
+        run: npm run build
+        working-directory: infra
+
+      - name: Run tests
+        run: npm test
+        working-directory: infra
+
+      - name: Configure AWS credentials (dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CDK_DEPLOY_ROLE_ARN_DEV }}
+          aws-region: eu-central-1
+
+      - name: CDK Synth
+        run: npx cdk synth
+        working-directory: infra
+        env:
+          KB_DEV_ACCOUNT: ${{ vars.KB_DEV_ACCOUNT }}
+          KB_PROD_ACCOUNT: ${{ vars.KB_PROD_ACCOUNT }}
+          KB_ALARM_EMAIL: ${{ vars.KB_ALARM_EMAIL }}
+
+      - name: CDK Diff (dev)
+        run: npx cdk diff KernpunktKbDev
+        working-directory: infra
+        env:
+          KB_DEV_ACCOUNT: ${{ vars.KB_DEV_ACCOUNT }}
+          KB_PROD_ACCOUNT: ${{ vars.KB_PROD_ACCOUNT }}
+
+  # ── Deploy Dev (auto on push to main) ──────────────────────────────────────
+  deploy-dev:
+    name: Deploy Dev
+    runs-on: ubuntu-latest
+    needs: synth-and-diff
+    if: github.event_name == 'push'
+    environment: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: infra
+
+      - name: Configure AWS credentials (dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CDK_DEPLOY_ROLE_ARN_DEV }}
+          aws-region: eu-central-1
+
+      - name: CDK Deploy (dev)
+        run: npx cdk deploy KernpunktKbDev --require-approval never
+        working-directory: infra
+        env:
+          KB_DEV_ACCOUNT: ${{ vars.KB_DEV_ACCOUNT }}
+          KB_PROD_ACCOUNT: ${{ vars.KB_PROD_ACCOUNT }}
+          KB_ALARM_EMAIL: ${{ vars.KB_ALARM_EMAIL }}
+
+  # ── Deploy Production (manual only) ────────────────────────────────────────
+  deploy-production:
+    name: Deploy Production
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production' && github.event.inputs.action == 'deploy'
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: infra
+
+      - name: Configure AWS credentials (production)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CDK_DEPLOY_ROLE_ARN_PROD }}
+          aws-region: eu-central-1
+
+      - name: CDK Deploy (production)
+        run: npx cdk deploy KernpunktKbProduction --require-approval never
+        working-directory: infra
+        env:
+          KB_DEV_ACCOUNT: ${{ vars.KB_DEV_ACCOUNT }}
+          KB_PROD_ACCOUNT: ${{ vars.KB_PROD_ACCOUNT }}
+          KB_ALARM_EMAIL: ${{ vars.KB_ALARM_EMAIL }}

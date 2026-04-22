@@ -1,0 +1,54 @@
+name: Sync Docs to Knowledge Base
+
+# ──────────────────────────────────────────────────────────────────────────────
+# This workflow is the EXAMPLE / TEMPLATE for consumer repos.
+# Copy it into your repo and set the four repository variables listed below.
+#
+# Required repository variables (Settings → Secrets and variables → Variables):
+#   KB_GITHUB_ACTIONS_ROLE_ARN  — IAM role ARN from the CDK stack output
+#   KB_S3_BUCKET                — S3 bucket name from the CDK stack output
+#   KB_KNOWLEDGE_BASE_ID        — Bedrock Knowledge Base ID from the CDK stack output
+#   KB_DATA_SOURCE_ID           — Data Source ID from the CDK stack output
+# ──────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - '**.md'
+      - '**.png'
+      - '**.jpg'
+      - '**.jpeg'
+      - '**.svg'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force full sync (ignores path filters)'
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write  # required for OIDC authentication with AWS
+  contents: read
+
+jobs:
+  sync:
+    name: Sync to Knowledge Base
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Full history required for git log in enrich-metadata.py
+          fetch-depth: 0
+
+      - name: Sync to kernpunkt Knowledge Base
+        uses: kernpunkt/kt-knowledge-base/.github/action.yml@main
+        with:
+          aws-role-arn: ${{ vars.KB_GITHUB_ACTIONS_ROLE_ARN }}
+          s3-bucket: ${{ vars.KB_S3_BUCKET }}
+          knowledge-base-id: ${{ vars.KB_KNOWLEDGE_BASE_ID }}
+          data-source-id: ${{ vars.KB_DATA_SOURCE_ID }}
