@@ -123,12 +123,27 @@ def _retrieve(args):
     if not results:
         return [{"type": "text", "text": "No results found."}]
 
-    text = "\n\n---\n\n".join(
-        f"**Source**: {r['location']['s3Location']['uri']}\n"
-        f"**Score**: {r['score']:.3f}\n\n{r['content']['text']}"
-        for r in results
-    )
-    return [{"type": "text", "text": text}]
+    chunks = []
+    for r in results:
+        meta = r.get("metadata") or {}
+        repo      = meta.get("source_repo", "")
+        file_path = meta.get("file_path", r["location"]["s3Location"]["uri"])
+        updated   = meta.get("last_updated", "")
+        editor    = meta.get("last_editor", "")
+
+        # Extra frontmatter fields — anything beyond the four standard ones
+        standard = {"source_repo", "file_path", "last_updated", "last_editor"}
+        extra = {k: v for k, v in meta.items() if k not in standard}
+
+        header = f"**{repo}** · `{file_path}` · Score: {r['score']:.3f}"
+        if updated or editor:
+            header += f"\nLast updated: {updated}" + (f" by {editor}" if editor else "")
+        if extra:
+            header += "\n" + "  |  ".join(f"{k}: {v}" for k, v in extra.items())
+
+        chunks.append(f"{header}\n\n{r['content']['text']}")
+
+    return [{"type": "text", "text": "\n\n---\n\n".join(chunks)}]
 
 
 def handler(event, context):
