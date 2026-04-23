@@ -71,21 +71,36 @@ def _list_repositories():
 
     repos = []
     for prefix in sorted(prefixes):
-        source_repo = None
-        resp = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix + "/", MaxKeys=20)
-        for obj in resp.get("Contents", []):
-            if obj["Key"].endswith(".metadata.json"):
-                try:
-                    body = s3.get_object(Bucket=S3_BUCKET, Key=obj["Key"])["Body"].read()
-                    source_repo = json.loads(body).get("metadataAttributes", {}).get("source_repo")
-                    if source_repo:
-                        break
-                except Exception:
-                    pass
-        repos.append(source_repo or prefix)
+        info = {"source_repo": prefix, "display_name": "", "description": ""}
+
+        # Preferred: dedicated repo-info file written by the sync action
+        try:
+            body = s3.get_object(Bucket=S3_BUCKET, Key=f"{prefix}/_repo-info.json")["Body"].read()
+            info.update(json.loads(body))
+        except Exception:
+            # Fallback: read source_repo from first document sidecar
+            resp = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix + "/", MaxKeys=20)
+            for obj in resp.get("Contents", []):
+                if obj["Key"].endswith(".metadata.json"):
+                    try:
+                        body = s3.get_object(Bucket=S3_BUCKET, Key=obj["Key"])["Body"].read()
+                        source_repo = json.loads(body).get("metadataAttributes", {}).get("source_repo")
+                        if source_repo:
+                            info["source_repo"] = source_repo
+                            break
+                    except Exception:
+                        pass
+
+        repos.append(info)
 
     lines = ["**Repositories in the knowledge base:**\n"]
-    lines += [f"- `{r}`" for r in repos]
+    for r in repos:
+        name = r.get("display_name") or r["source_repo"]
+        line = f"- **{name}** (`{r['source_repo']}`)"
+        if r.get("description"):
+            line += f"\n  {r['description']}"
+        lines.append(line)
+
     return [{"type": "text", "text": "\n".join(lines)}]
 
 

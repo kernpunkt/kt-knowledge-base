@@ -68,7 +68,18 @@ Im Consumer-Repository unter **Settings → Secrets and variables → Variables*
 | `KB_KNOWLEDGE_BASE_ID` | `I3WHA5QNNJ` |
 | `KB_DATA_SOURCE_ID` | `MHEEAFXZR5` |
 
-### 3. Ersten Sync anstoßen
+### 3. Anzeigenamen vergeben (optional)
+
+Lege eine `.kb-config.yaml` im Root des Consumer-Repositories an, damit das Repository in `list_repositories` mit einem lesbaren Namen erscheint:
+
+```yaml
+display_name: "Dokumentation Projekt MUP - The One"
+description: "Architekturentscheidungen, technische Konzepte und API-Specs für die MUP-Plattform."
+```
+
+Beide Felder sind optional — ohne die Datei wird der GitHub-Repository-Name als Fallback verwendet.
+
+### 4. Ersten Sync anstoßen
 
 Da beim ersten Push keine `.md`-Dateien *geändert* wurden, den Workflow manuell auslösen:
 

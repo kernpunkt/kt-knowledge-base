@@ -62,7 +62,10 @@ export class McpServer extends Construct {
       sid: 'S3ReadMetadata',
       effect: iam.Effect.ALLOW,
       actions: ['s3:GetObject'],
-      resources: [`${props.documentBucket.bucketArn}/*.metadata.json`],
+      resources: [
+        `${props.documentBucket.bucketArn}/*.metadata.json`,
+        `${props.documentBucket.bucketArn}/*/_repo-info.json`,
+      ],
     }));
 
     // NONE auth — API key validation is handled inside the Lambda handler

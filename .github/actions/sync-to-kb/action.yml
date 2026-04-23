@@ -89,6 +89,36 @@ runs:
           --root-dir "${{ github.workspace }}" \
           --output-dir "$STAGING_DIR"
 
+    - name: Write repo info to staging
+      shell: bash
+      run: |
+        python - <<'PYEOF'
+        import json, os
+        from pathlib import Path
+
+        workspace = Path(os.environ['GITHUB_WORKSPACE'])
+        staging   = Path(os.environ['STAGING_DIR'])
+        repo      = os.environ['GITHUB_REPOSITORY']
+
+        config = {}
+        config_path = workspace / '.kb-config.yaml'
+        if config_path.exists():
+            try:
+                import yaml
+                config = yaml.safe_load(config_path.read_text()) or {}
+            except Exception:
+                pass
+
+        info = {
+            'source_repo':  repo,
+            'display_name': config.get('display_name', ''),
+            'description':  config.get('description', ''),
+        }
+        (staging / '_repo-info.json').write_text(
+            json.dumps(info, ensure_ascii=False, indent=2)
+        )
+        PYEOF
+
     - name: Sync to S3
       shell: bash
       run: |
