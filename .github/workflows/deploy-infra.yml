@@ -46,7 +46,6 @@ jobs:
   synth-and-diff:
     name: Synth & Diff
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'deploy')
     environment: dev
 
     steps:
@@ -96,7 +95,7 @@ jobs:
     name: Deploy Dev
     runs-on: ubuntu-latest
     needs: synth-and-diff
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.action == 'deploy')
     environment: dev
 
     steps:
