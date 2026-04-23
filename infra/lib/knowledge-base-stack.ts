@@ -6,6 +6,7 @@ import { BedrockExecutionRole, GitHubActionsRole, AgentConsumerRole } from './co
 import { S3VectorsStore } from './constructs/s3-vectors-store';
 import { BedrockKnowledgeBase } from './constructs/bedrock-knowledge-base';
 import { Monitoring } from './constructs/monitoring';
+import { McpServer } from './constructs/mcp-server';
 
 export interface KnowledgeBaseStackProps extends cdk.StackProps {
   config: KbConfig;
@@ -84,7 +85,15 @@ export class KnowledgeBaseStack extends cdk.Stack {
       envName: config.envName,
     });
 
-    // 8. Monitoring — log groups and alarms
+    // 8. MCP server — Lambda Function URL with API key auth
+    new McpServer(this, 'McpServer', {
+      knowledgeBaseId: knowledgeBase.knowledgeBaseId,
+      knowledgeBaseArn: knowledgeBase.knowledgeBaseArn,
+      documentBucket: documentBucket.bucket,
+      envName: config.envName,
+    });
+
+    // 9. Monitoring — log groups and alarms
     new Monitoring(this, 'Monitoring', {
       knowledgeBaseId: knowledgeBase.knowledgeBaseId,
       envName: config.envName,

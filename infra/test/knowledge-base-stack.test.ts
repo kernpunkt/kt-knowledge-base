@@ -243,6 +243,48 @@ describe('KnowledgeBaseStack', () => {
     });
   });
 
+  // ── MCP Server ─────────────────────────────────────────────────────────────
+
+  describe('MCP Server', () => {
+    test('Lambda function exists with correct runtime and handler', () => {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        Runtime: 'python3.12',
+        Handler: 'lambda_function.handler',
+        Timeout: 30,
+      });
+    });
+
+    test('Lambda function URL uses no IAM auth (API key handled in handler)', () => {
+      template.hasResourceProperties('AWS::Lambda::Url', {
+        AuthType: 'NONE',
+      });
+    });
+
+    test('Lambda has Bedrock Retrieve permission', () => {
+      template.hasResourceProperties('AWS::IAM::Policy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: 'bedrock:Retrieve',
+              Effect: 'Allow',
+              Sid: 'BedrockRetrieve',
+            }),
+          ]),
+        },
+      });
+    });
+
+    test('API key secret exists in Secrets Manager', () => {
+      template.hasResourceProperties('AWS::SecretsManager::Secret', {
+        Name: 'KernpunktKbMcpApiKey-dev',
+        GenerateSecretString: {
+          ExcludePunctuation: true,
+          PasswordLength: 32,
+        },
+      });
+    });
+  });
+
   // ── Stack outputs ──────────────────────────────────────────────────────────
 
   describe('Stack Outputs', () => {
