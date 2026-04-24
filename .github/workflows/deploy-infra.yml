@@ -70,7 +70,7 @@ jobs:
         working-directory: infra
 
       - name: Configure AWS credentials (dev)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.CDK_DEPLOY_ROLE_ARN_DEV }}
           aws-region: eu-central-1
@@ -112,7 +112,7 @@ jobs:
         working-directory: infra
 
       - name: Configure AWS credentials (dev)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.CDK_DEPLOY_ROLE_ARN_DEV }}
           aws-region: eu-central-1
@@ -146,7 +146,7 @@ jobs:
         working-directory: infra
 
       - name: Configure AWS credentials (production)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.CDK_DEPLOY_ROLE_ARN_PROD }}
           aws-region: eu-central-1
