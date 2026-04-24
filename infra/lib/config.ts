@@ -32,7 +32,7 @@ export function getConfig(env: Environment): KbConfig {
       bucketName: 'kernpunkt-kb-documents-dev',
       vectorBucketName: 'kernpunkt-kb-vectors-dev',
       kbName: 'kernpunkt-knowledge-base-dev',
-      dataSourceName: 'documents-s3-dev-v2',
+      dataSourceName: 'documents-s3-dev-v3',
       logRetentionDays: 30,
     };
   }
