@@ -18,10 +18,6 @@ on:
       - master
     paths:
       - '**.md'
-      - '**.png'
-      - '**.jpg'
-      - '**.jpeg'
-      - '**.svg'
   workflow_dispatch:
     inputs:
       force:

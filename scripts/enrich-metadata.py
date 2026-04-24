@@ -7,8 +7,6 @@ For each .md file found in the repo, this script:
   2. Reads git history for last_updated and last_editor
   3. Writes a <file>.metadata.json sidecar in the format AWS Bedrock expects
 
-For image files (.png, .jpg, .svg), only technical metadata is written.
-
 Usage:
     python enrich-metadata.py --repo-name <name> --root-dir <path> [--output-dir <path>]
 """
@@ -32,11 +30,13 @@ except ImportError:
 # Bedrock metadata constraints
 MAX_METADATA_VALUE_LENGTH = 256
 MAX_METADATA_ATTRIBUTES = 10
+# S3 Vectors limit: filterable metadata JSON must be <= 2048 bytes per vector.
+# We target 1800 to leave headroom for Bedrock's own internal framing.
+MAX_METADATA_BYTES = 1800
 
-# Supported document and image extensions
+# Supported document extensions (images excluded — Bedrock cannot index them)
 DOCUMENT_EXTENSIONS = {'.md'}
-IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.svg'}
-ALL_SUPPORTED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS
+ALL_SUPPORTED_EXTENSIONS = DOCUMENT_EXTENSIONS
 
 # Directories to skip
 SKIP_DIRS = {
@@ -181,6 +181,17 @@ def build_metadata(
                 continue
 
             attributes[clean_key] = normalized
+
+    # Enforce S3 Vectors 2048-byte filterable metadata limit.
+    # Drop extra frontmatter fields (never the four standard ones) until it fits.
+    standard_keys = {'source_repo', 'last_updated', 'last_editor', 'file_path'}
+    while len(json.dumps(attributes, ensure_ascii=False).encode()) > MAX_METADATA_BYTES:
+        extra_keys = [k for k in reversed(list(attributes)) if k not in standard_keys]
+        if not extra_keys:
+            break
+        dropped = extra_keys[0]
+        del attributes[dropped]
+        print(f'  Warning: dropped metadata field "{dropped}" to stay under S3 Vectors byte limit', file=sys.stderr)
 
     return attributes
 

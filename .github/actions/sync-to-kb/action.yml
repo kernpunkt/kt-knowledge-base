@@ -80,10 +80,6 @@ runs:
         rsync -a \
           --include="*/" \
           --include="*.md" \
-          --include="*.png" \
-          --include="*.jpg" \
-          --include="*.jpeg" \
-          --include="*.svg" \
           --exclude="*" \
           --exclude-from=<(echo -e "node_modules/\n.git/\ndist/\nbuild/\ncdk.out/\n.env\n.env.*") \
           "$SOURCE" \
