@@ -63,7 +63,7 @@ export class BedrockKnowledgeBase extends Construct {
         chunkingConfiguration: {
           chunkingStrategy: 'SEMANTIC',
           semanticChunkingConfiguration: {
-            maxTokens: 300,
+            maxTokens: 150,
             bufferSize: 0,
             breakpointPercentileThreshold: 95,
           },

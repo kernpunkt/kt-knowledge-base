@@ -32,7 +32,7 @@ MAX_METADATA_VALUE_LENGTH = 256
 MAX_METADATA_ATTRIBUTES = 10
 # S3 Vectors limit: filterable metadata JSON must be <= 2048 bytes per vector.
 # We target 1800 to leave headroom for Bedrock's own internal framing.
-MAX_METADATA_BYTES = 1800
+MAX_METADATA_BYTES = 1200
 
 # Supported document extensions (images excluded — Bedrock cannot index them)
 DOCUMENT_EXTENSIONS = {'.md'}
