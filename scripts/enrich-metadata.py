@@ -113,6 +113,8 @@ def normalize_value(value: Any) -> str | int | float | bool | None:
         return value
     if isinstance(value, str):
         v = value.strip()
+        if not v:
+            return None  # Bedrock rejects empty strings as metadata values
         return v[:MAX_METADATA_VALUE_LENGTH] if len(v) > MAX_METADATA_VALUE_LENGTH else v
     if isinstance(value, list):
         # Convert list to comma-separated string; flatten nested items
