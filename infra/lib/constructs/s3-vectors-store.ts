@@ -21,7 +21,11 @@ export class S3VectorsStore extends Construct {
       vectorBucketName: props.vectorBucketName,
     });
 
-    // 1024 dims matches Titan Embeddings v2; cosine is correct for its normalized output
+    // 1024 dims matches Titan Embeddings v2; cosine is correct for its normalized output.
+    // NOTE: The actual AWS resource has nonFilterableMetadataKeys=['AMAZON_BEDROCK_TEXT',
+    // 'AMAZON_BEDROCK_METADATA'] configured manually — this property is immutable and
+    // cannot be changed via CloudFormation update (requires replacement with same-name
+    // conflict). The CDK definition intentionally omits it to avoid CF drift detection.
     const vectorIndex = new s3vectors.CfnIndex(this, 'VectorIndex', {
       vectorBucketArn: vectorBucket.attrVectorBucketArn,
       indexName: VECTOR_INDEX_NAME,
