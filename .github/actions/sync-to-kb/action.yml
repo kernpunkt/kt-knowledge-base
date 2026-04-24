@@ -23,6 +23,12 @@ inputs:
       slugified repository name (owner/repo → owner-repo).
     required: false
     default: ''
+  source-path:
+    description: >
+      Subdirectory within the repo to sync (e.g. "docs"). Defaults to the
+      entire repository. Only files under this path will be ingested.
+    required: false
+    default: ''
   aws-region:
     description: 'AWS region where the knowledge base is deployed.'
     required: false
@@ -67,6 +73,8 @@ runs:
     - name: Copy supported files to staging directory
       shell: bash
       run: |
+        SOURCE_PATH="${{ inputs.source-path }}"
+        SOURCE="${{ github.workspace }}${SOURCE_PATH:+/$SOURCE_PATH}/"
         # Use rsync to copy only supported file types while preserving directory structure.
         # This avoids aws s3 sync include/exclude ordering pitfalls.
         rsync -a \
@@ -78,15 +86,17 @@ runs:
           --include="*.svg" \
           --exclude="*" \
           --exclude-from=<(echo -e "node_modules/\n.git/\ndist/\nbuild/\ncdk.out/\n.env\n.env.*") \
-          "${{ github.workspace }}/" \
+          "$SOURCE" \
           "$STAGING_DIR/"
 
     - name: Generate metadata sidecar files
       shell: bash
       run: |
+        SOURCE_PATH="${{ inputs.source-path }}"
+        ROOT_DIR="${{ github.workspace }}${SOURCE_PATH:+/$SOURCE_PATH}"
         python "${{ github.action_path }}/../../../scripts/enrich-metadata.py" \
           --repo-name "${{ github.repository }}" \
-          --root-dir "${{ github.workspace }}" \
+          --root-dir "$ROOT_DIR" \
           --output-dir "$STAGING_DIR"
 
     - name: Write repo info to staging
