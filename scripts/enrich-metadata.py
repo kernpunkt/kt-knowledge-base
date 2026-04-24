@@ -123,6 +123,8 @@ def normalize_value(value: Any) -> str | int | float | bool | None:
             if isinstance(item, (str, int, float, bool)):
                 parts.append(str(item))
         joined = ','.join(parts)
+        if not joined:
+            return None  # Bedrock rejects empty strings; skip empty lists too
         if len(joined) > MAX_METADATA_VALUE_LENGTH:
             print(
                 f'  Warning: serialized list value truncated to {MAX_METADATA_VALUE_LENGTH} chars',

@@ -133,17 +133,43 @@ runs:
           --delete \
           --region "${{ inputs.aws-region }}"
 
-    - name: Start Bedrock ingestion job
+    - name: Start Bedrock ingestion job (with retry)
       shell: bash
       run: |
-        JOB_ID=$(aws bedrock-agent start-ingestion-job \
-          --knowledge-base-id "${{ inputs.knowledge-base-id }}" \
-          --data-source-id "${{ inputs.data-source-id }}" \
-          --region "${{ inputs.aws-region }}" \
-          --query 'ingestionJob.ingestionJobId' \
-          --output text)
-        echo "Ingestion job started: $JOB_ID"
-        echo "INGESTION_JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+        MAX_WAIT=1800
+        INTERVAL=30
+        ELAPSED=0
+
+        while true; do
+          OUTPUT=$(aws bedrock-agent start-ingestion-job \
+            --knowledge-base-id "${{ inputs.knowledge-base-id }}" \
+            --data-source-id "${{ inputs.data-source-id }}" \
+            --region "${{ inputs.aws-region }}" \
+            --output json 2>&1)
+          EXIT=$?
+
+          if [ $EXIT -eq 0 ]; then
+            JOB_ID=$(echo "$OUTPUT" | python3 -c \
+              "import json,sys; print(json.load(sys.stdin)['ingestionJob']['ingestionJobId'])")
+            echo "Ingestion job started: $JOB_ID"
+            echo "INGESTION_JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+            break
+          fi
+
+          if echo "$OUTPUT" | grep -q "ConflictException"; then
+            if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+              echo "::error::Timed out after ${MAX_WAIT}s waiting for ongoing ingestion job."
+              exit 1
+            fi
+            echo "Ongoing ingestion job detected. Retry in ${INTERVAL}s (${ELAPSED}s elapsed)..."
+            sleep "$INTERVAL"
+            ELAPSED=$((ELAPSED + INTERVAL))
+          else
+            echo "::error::Unexpected error starting ingestion job:"
+            echo "$OUTPUT"
+            exit 1
+          fi
+        done
 
     - name: Report ingestion job URL
       shell: bash
