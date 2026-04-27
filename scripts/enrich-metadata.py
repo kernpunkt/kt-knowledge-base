@@ -29,7 +29,7 @@ except ImportError:
 
 # Bedrock metadata constraints
 MAX_METADATA_VALUE_LENGTH = 256
-MAX_METADATA_ATTRIBUTES = 10
+MAX_METADATA_ATTRIBUTES = 15
 # S3 Vectors limit: filterable metadata JSON must be <= 2048 bytes per vector.
 # We target 1800 to leave headroom for Bedrock's own internal framing.
 MAX_METADATA_BYTES = 1200
@@ -144,6 +144,7 @@ def build_metadata(
     root_dir: Path,
     repo_name: str,
     is_document: bool,
+    default_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the metadataAttributes dict for a single file."""
     last_updated, last_editor = get_git_metadata(file_path, root_dir)
@@ -155,6 +156,18 @@ def build_metadata(
         'last_editor': last_editor,
         'file_path': rel_path,
     }
+
+    # Apply repo-level defaults (frontmatter in individual files overrides these)
+    if default_metadata:
+        for key, raw_value in default_metadata.items():
+            if len(attributes) >= MAX_METADATA_ATTRIBUTES:
+                break
+            normalized = normalize_value(raw_value)
+            if normalized is None:
+                continue
+            clean_key = re.sub(r'[^\w\-]', '_', str(key)).strip('_')
+            if clean_key and clean_key not in attributes:
+                attributes[clean_key] = normalized
 
     if is_document:
         try:
@@ -186,6 +199,10 @@ def build_metadata(
 
             attributes[clean_key] = normalized
 
+    # Fallback: every document gets a verbindlichkeit; repos with no explicit value get "mittel"
+    if 'verbindlichkeit' not in attributes:
+        attributes['verbindlichkeit'] = 'mittel'
+
     # Enforce S3 Vectors 2048-byte filterable metadata limit.
     # Drop extra frontmatter fields (never the four standard ones) until it fits.
     standard_keys = {'source_repo', 'last_updated', 'last_editor', 'file_path'}
@@ -207,7 +224,7 @@ def write_sidecar(file_path: Path, attributes: dict[str, Any]) -> None:
     sidecar_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
-def enrich_directory(root_dir: Path, repo_name: str, output_dir: Path) -> int:
+def enrich_directory(root_dir: Path, repo_name: str, output_dir: Path, default_metadata: dict[str, Any] | None = None) -> int:
     """Walk the directory, enrich all supported files. Returns count of processed files."""
     count = 0
     for dirpath, dirnames, filenames in os.walk(root_dir):
@@ -237,7 +254,7 @@ def enrich_directory(root_dir: Path, repo_name: str, output_dir: Path) -> int:
 
             print(f'  Processing: {rel}')
 
-            attributes = build_metadata(file_path, root_dir, repo_name, is_document)
+            attributes = build_metadata(file_path, root_dir, repo_name, is_document, default_metadata)
 
             # Write sidecar alongside the output file location
             sidecar_path = output_file.with_suffix(output_file.suffix + '.metadata.json')
@@ -274,11 +291,33 @@ def main() -> None:
         default=None,
         help='Directory to write sidecar files (default: alongside source files in root-dir)',
     )
+    parser.add_argument(
+        '--kb-config',
+        type=Path,
+        default=None,
+        help='Path to .kb-config.yaml (default: <root-dir>/.kb-config.yaml). '
+             'The default_metadata section is applied to all documents as fallback values.',
+    )
 
     args = parser.parse_args()
 
     root_dir = args.root_dir.resolve()
     output_dir = (args.output_dir or root_dir).resolve()
+
+    # Load default_metadata from .kb-config.yaml if present
+    default_metadata: dict[str, Any] = {}
+    kb_config_path = (args.kb_config or root_dir / '.kb-config.yaml').resolve()
+    if kb_config_path.exists():
+        try:
+            if HAS_YAML:
+                raw_config = yaml.safe_load(kb_config_path.read_text(encoding='utf-8')) or {}
+            else:
+                raw_config = {}
+            default_metadata = raw_config.get('default_metadata') or {}
+            if default_metadata:
+                print(f'Default metadata from {kb_config_path.name}: {default_metadata}')
+        except Exception as e:
+            print(f'Warning: could not read {kb_config_path}: {e}', file=sys.stderr)
 
     if not root_dir.is_dir():
         print(f'Error: root-dir does not exist: {root_dir}', file=sys.stderr)
@@ -296,7 +335,7 @@ def main() -> None:
     print(f'Output dir: {output_dir}')
     print()
 
-    count = enrich_directory(root_dir, args.repo_name, output_dir)
+    count = enrich_directory(root_dir, args.repo_name, output_dir, default_metadata or None)
     print(f'\nDone. Processed {count} file(s).')
 
 

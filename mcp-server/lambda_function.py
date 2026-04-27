@@ -31,7 +31,7 @@ RETRIEVE_TOOL = {
     "name": "retrieve_from_knowledge_bases",
     "description": (
         "Search the kernpunkt knowledge base for project documentation, "
-        "architecture decisions, and concepts."
+        "architecture decisions, concepts, Teams summaries, and JIRA exports."
     ),
     "inputSchema": {
         "type": "object",
@@ -45,6 +45,34 @@ RETRIEVE_TOOL = {
                 "description": (
                     "Optional: restrict results to one GitHub repository, "
                     "e.g. 'kernpunkt/mup-docs'"
+                ),
+            },
+            "verbindlichkeit": {
+                "type": "string",
+                "description": (
+                    "Optional: filter by credibility level — "
+                    "'hoch' (ADRs/concepts), 'mittel' (meeting protocols), "
+                    "'niedrig' (JIRA exports), 'hinweis' (Teams summaries)"
+                ),
+                "enum": ["hoch", "mittel", "niedrig", "hinweis"],
+            },
+            "typ": {
+                "type": "string",
+                "description": (
+                    "Optional: filter by document type, "
+                    "e.g. 'teams-zusammenfassung' or 'jira-export'"
+                ),
+            },
+            "projekt": {
+                "type": "string",
+                "description": "Optional: filter by project name as stored in document frontmatter",
+            },
+            "filter": {
+                "type": "object",
+                "description": (
+                    "Optional: filter by any frontmatter metadata field as key-value pairs, "
+                    "e.g. {\"kanal\": \"general\"} or {\"jira_project_key\": \"MUP\"}. "
+                    "Combined with AND logic alongside the other filter parameters."
                 ),
             },
             "numberOfResults": {
@@ -105,23 +133,32 @@ def _list_repositories():
 
 
 def _retrieve(args):
+    vcfg = {"numberOfResults": args.get("numberOfResults", 5)}
+
+    filters = []
+    for key in ("source_repo", "verbindlichkeit", "typ", "projekt"):
+        if key in args:
+            filters.append({"equals": {"key": key, "value": args[key]}})
+    for key, value in (args.get("filter") or {}).items():
+        filters.append({"equals": {"key": key, "value": value}})
+    if len(filters) == 1:
+        vcfg["filter"] = filters[0]
+    elif len(filters) > 1:
+        vcfg["filter"] = {"andAll": filters}
+
     params = {
         "knowledgeBaseId": KB_ID,
         "retrievalQuery": {"text": args["query"]},
-        "retrievalConfiguration": {
-            "vectorSearchConfiguration": {
-                "numberOfResults": args.get("numberOfResults", 5),
-            }
-        },
+        "retrievalConfiguration": {"vectorSearchConfiguration": vcfg},
     }
-    if "source_repo" in args:
-        params["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] = {
-            "equals": {"key": "source_repo", "value": args["source_repo"]}
-        }
 
     results = bedrock.retrieve(**params)["retrievalResults"]
     if not results:
         return [{"type": "text", "text": "No results found."}]
+
+    # Fields shown in their own line for quick orientation
+    PROMINENT = {"verbindlichkeit", "typ", "kanal", "zeitraum_von", "zeitraum_bis"}
+    standard = {"source_repo", "file_path", "last_updated", "last_editor"}
 
     chunks = []
     for r in results:
@@ -131,13 +168,15 @@ def _retrieve(args):
         updated   = meta.get("last_updated", "")
         editor    = meta.get("last_editor", "")
 
-        # Extra frontmatter fields — anything beyond the four standard ones
-        standard = {"source_repo", "file_path", "last_updated", "last_editor"}
-        extra = {k: v for k, v in meta.items() if k not in standard}
-
         header = f"**{repo}** · `{file_path}` · Score: {r['score']:.3f}"
         if updated or editor:
             header += f"\nLast updated: {updated}" + (f" by {editor}" if editor else "")
+
+        prominent_parts = [f"{k}: {meta[k]}" for k in PROMINENT if k in meta]
+        if prominent_parts:
+            header += "\n" + "  |  ".join(prominent_parts)
+
+        extra = {k: v for k, v in meta.items() if k not in standard and k not in PROMINENT}
         if extra:
             header += "\n" + "  |  ".join(f"{k}: {v}" for k, v in extra.items())
 

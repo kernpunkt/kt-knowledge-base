@@ -93,7 +93,8 @@ runs:
         python "${{ github.action_path }}/../../../scripts/enrich-metadata.py" \
           --repo-name "${{ github.repository }}" \
           --root-dir "$ROOT_DIR" \
-          --output-dir "$STAGING_DIR"
+          --output-dir "$STAGING_DIR" \
+          --kb-config "${{ github.workspace }}/.kb-config.yaml"
 
     - name: Write repo info to staging
       shell: bash
