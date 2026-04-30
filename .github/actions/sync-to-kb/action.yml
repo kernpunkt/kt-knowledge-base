@@ -142,14 +142,13 @@ runs:
         ELAPSED=0
 
         while true; do
-          OUTPUT=$(aws bedrock-agent start-ingestion-job \
+          # 'if' suppresses set -e so the non-zero exit from aws doesn't kill
+          # the script before the retry logic can inspect $OUTPUT.
+          if OUTPUT=$(aws bedrock-agent start-ingestion-job \
             --knowledge-base-id "${{ inputs.knowledge-base-id }}" \
             --data-source-id "${{ inputs.data-source-id }}" \
             --region "${{ inputs.aws-region }}" \
-            --output json 2>&1)
-          EXIT=$?
-
-          if [ $EXIT -eq 0 ]; then
+            --output json 2>&1); then
             JOB_ID=$(echo "$OUTPUT" | python3 -c \
               "import json,sys; print(json.load(sys.stdin)['ingestionJob']['ingestionJobId'])")
             echo "Ingestion job started: $JOB_ID"
