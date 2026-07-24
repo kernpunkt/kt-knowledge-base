@@ -6,15 +6,61 @@ import boto3
 KB_ID = os.environ["KNOWLEDGE_BASE_ID"]
 S3_BUCKET = os.environ["S3_BUCKET_NAME"]
 REGION = os.environ.get("AWS_REGION", "eu-central-1")
+
+ENTRA_TENANT_ID = os.environ.get("ENTRA_TENANT_ID", "")
+ENTRA_CLIENT_ID = os.environ.get("ENTRA_CLIENT_ID", "")
+ENTRA_ISSUER = f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}/v2.0"
+ENTRA_JWKS_URL = f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}/discovery/v2.0/keys"
+
 bedrock = boto3.client("bedrock-agent-runtime", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
 secrets = boto3.client("secretsmanager", region_name=REGION)
 
+# Lazy-initialised; only created when Entra is configured
+_jwks_client = None
+
+
+def _get_jwks_client():
+    global _jwks_client
+    if _jwks_client is None:
+        from jwt import PyJWKClient
+        _jwks_client = PyJWKClient(ENTRA_JWKS_URL, cache_keys=True)
+    return _jwks_client
+
 
 @functools.lru_cache(maxsize=1)
 def _get_api_key():
-    """Fetch API key from Secrets Manager; cached for the lifetime of the container."""
     return secrets.get_secret_value(SecretId=os.environ["API_KEY_SECRET_ARN"])["SecretString"]
+
+
+def _validate_jwt(token: str) -> bool:
+    if not ENTRA_TENANT_ID or not ENTRA_CLIENT_ID:
+        return False
+    try:
+        from jwt import decode as jwt_decode
+        from jwt.exceptions import InvalidTokenError
+        signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
+        payload = jwt_decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            issuer=ENTRA_ISSUER,
+            options={"verify_aud": False},  # aud can be client-id or api://<client-id>
+        )
+        aud = payload.get("aud", "")
+        if isinstance(aud, str):
+            aud = [aud]
+        valid_audiences = {ENTRA_CLIENT_ID, f"api://{ENTRA_CLIENT_ID}"}
+        return bool(valid_audiences.intersection(set(aud)))
+    except Exception:
+        return False
+
+
+def _validate_token(token: str) -> bool:
+    """Accept a valid Entra ID JWT or the legacy API key."""
+    if _validate_jwt(token):
+        return True
+    return bool(token and token == _get_api_key())
 
 
 LIST_REPOS_TOOL = {
@@ -101,12 +147,10 @@ def _list_repositories():
     for prefix in sorted(prefixes):
         info = {"source_repo": prefix, "display_name": "", "description": ""}
 
-        # Preferred: dedicated repo-info file written by the sync action
         try:
             body = s3.get_object(Bucket=S3_BUCKET, Key=f"{prefix}/_repo-info.json")["Body"].read()
             info.update(json.loads(body))
         except Exception:
-            # Fallback: read source_repo from first document sidecar
             resp = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix + "/", MaxKeys=20)
             for obj in resp.get("Contents", []):
                 if obj["Key"].endswith(".metadata.json"):
@@ -156,7 +200,6 @@ def _retrieve(args):
     if not results:
         return [{"type": "text", "text": "No results found."}]
 
-    # Fields shown in their own line for quick orientation
     PROMINENT = {"verbindlichkeit", "typ", "kanal", "zeitraum_von", "zeitraum_bis"}
     standard = {"source_repo", "file_path", "last_updated", "last_editor"}
 
@@ -185,29 +228,83 @@ def _retrieve(args):
     return [{"type": "text", "text": "\n\n---\n\n".join(chunks)}]
 
 
+def _respond(event, msg_id, result):
+    body = json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": result})
+    headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+    if "text/event-stream" in headers.get("accept", ""):
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "text/event-stream", "Cache-Control": "no-cache"},
+            "body": f"data: {body}\n\n",
+        }
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": body,
+    }
+
+
+def _resource_url(event):
+    domain = event.get("requestContext", {}).get("domainName", "")
+    return f"https://{domain}/"
+
+
 def handler(event, context):
-    # Validate API key from Authorization: Bearer <key> header
+    http = event.get("requestContext", {}).get("http", {})
+    method = http.get("method", "POST")
+    path = http.get("path", "/")
+
+    # OAuth resource metadata discovery — no auth required, needed for Claude Desktop OAuth flow
+    if method == "GET" and path == "/.well-known/oauth-protected-resource":
+        if not ENTRA_TENANT_ID or not ENTRA_CLIENT_ID:
+            # OAuth not configured — don't advertise a broken authorization server
+            return {"statusCode": 404, "body": "Not Found"}
+        resource = _resource_url(event)
+        metadata = {
+            "resource": resource,
+            "authorization_servers": [ENTRA_ISSUER],
+            "bearer_methods_supported": ["header"],
+            "scopes_supported": [f"api://{ENTRA_CLIENT_ID}/access_as_user"],
+        }
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(metadata),
+        }
+
+    if method != "POST":
+        return {"statusCode": 405, "body": "Method Not Allowed"}
+
+    # Accept Entra ID JWT (OAuth) or legacy API key — both via Authorization: Bearer
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     token = headers.get("authorization", "").removeprefix("Bearer ").strip()
-    if not token or token != _get_api_key():
-        return {"statusCode": 401, "body": json.dumps({"error": "Unauthorized"})}
+    if not token or not _validate_token(token):
+        resource = _resource_url(event)
+        return {
+            "statusCode": 401,
+            "headers": {
+                "Content-Type": "application/json",
+                "WWW-Authenticate": f'Bearer realm="{resource}", error="invalid_token"',
+            },
+            "body": json.dumps({"error": "Unauthorized"}),
+        }
 
     body = json.loads(event.get("body") or "{}")
-    method = body.get("method", "")
+    mcp_method = body.get("method", "")
     msg_id = body.get("id")
 
-    if method == "notifications/initialized":
+    if mcp_method == "notifications/initialized":
         return {"statusCode": 202, "body": ""}
 
-    if method == "initialize":
+    if mcp_method == "initialize":
         result = {
             "protocolVersion": "2025-03-26",
             "capabilities": {"tools": {}},
             "serverInfo": {"name": "kernpunkt-kb", "version": "1.0.0"},
         }
-    elif method == "tools/list":
+    elif mcp_method == "tools/list":
         result = {"tools": [LIST_REPOS_TOOL, RETRIEVE_TOOL]}
-    elif method == "tools/call":
+    elif mcp_method == "tools/call":
         name = body["params"]["name"]
         args = body["params"].get("arguments", {})
         if name == "list_repositories":
@@ -222,8 +319,4 @@ def handler(event, context):
     else:
         result = {}
 
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": result}),
-    }
+    return _respond(event, msg_id, result)

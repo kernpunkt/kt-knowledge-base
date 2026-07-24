@@ -10,6 +10,10 @@ export interface McpServerProps {
   knowledgeBaseArn: string;
   documentBucket: s3.IBucket;
   envName: string;
+  /** Azure Entra ID tenant GUID — required for Claude Desktop OAuth flow */
+  entraTenantId?: string;
+  /** Application (client) ID from the Entra App Registration */
+  entraClientId?: string;
 }
 
 export class McpServer extends Construct {
@@ -18,7 +22,6 @@ export class McpServer extends Construct {
   constructor(scope: Construct, id: string, props: McpServerProps) {
     super(scope, id);
 
-    // Generate and store API key in Secrets Manager
     const apiKeySecret = new secretsmanager.Secret(this, 'ApiKey', {
       secretName: `KernpunktKbMcpApiKey-${props.envName}`,
       generateSecretString: {
@@ -27,19 +30,32 @@ export class McpServer extends Construct {
       },
     });
 
+    const env: Record<string, string> = {
+      KNOWLEDGE_BASE_ID: props.knowledgeBaseId,
+      S3_BUCKET_NAME: props.documentBucket.bucketName,
+      API_KEY_SECRET_ARN: apiKeySecret.secretArn,
+    };
+
+    if (props.entraTenantId) env['ENTRA_TENANT_ID'] = props.entraTenantId;
+    if (props.entraClientId)  env['ENTRA_CLIENT_ID']  = props.entraClientId;
+
     const fn = new lambda.Function(this, 'Function', {
       functionName: `KernpunktKbMcp-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'lambda_function.handler',
-      // Path is relative to the infra/ directory (where CDK runs from)
-      code: lambda.Code.fromAsset('../mcp-server'),
+      code: lambda.Code.fromAsset('../mcp-server', {
+        bundling: {
+          // Installs PyJWT[crypto] into the deployment zip (requires Docker at synth/deploy time)
+          image: lambda.Runtime.PYTHON_3_12.bundlingImage,
+          command: [
+            'bash', '-c',
+            'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output',
+          ],
+        },
+      }),
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
-      environment: {
-        KNOWLEDGE_BASE_ID: props.knowledgeBaseId,
-        S3_BUCKET_NAME: props.documentBucket.bucketName,
-        API_KEY_SECRET_ARN: apiKeySecret.secretArn,
-      },
+      environment: env,
     });
 
     apiKeySecret.grantRead(fn);
@@ -68,13 +84,12 @@ export class McpServer extends Construct {
       ],
     }));
 
-    // NONE auth — API key validation is handled inside the Lambda handler
     const url = fn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
       cors: {
         allowedOrigins: ['*'],
-        allowedMethods: [lambda.HttpMethod.POST],
-        allowedHeaders: ['authorization', 'content-type'],
+        allowedMethods: [lambda.HttpMethod.POST, lambda.HttpMethod.GET],
+        allowedHeaders: ['authorization', 'content-type', 'accept', 'mcp-session-id'],
       },
     });
 
@@ -82,13 +97,13 @@ export class McpServer extends Construct {
 
     new cdk.CfnOutput(scope, 'McpServerUrl', {
       value: url.url,
-      description: 'MCP server Lambda Function URL — clients send Authorization: Bearer <key>',
+      description: 'MCP server URL — OAuth (Entra ID) or legacy Bearer API key',
       exportName: `KernpunktKb-${props.envName}-McpServerUrl`,
     });
 
     new cdk.CfnOutput(scope, 'McpApiKeySecretArn', {
       value: apiKeySecret.secretArn,
-      description: 'Secrets Manager ARN — run: aws secretsmanager get-secret-value --secret-id <arn> --query SecretString --output text',
+      description: 'Legacy API key — run: aws secretsmanager get-secret-value --secret-id <arn> --query SecretString --output text',
       exportName: `KernpunktKb-${props.envName}-McpApiKeySecretArn`,
     });
   }

@@ -32,6 +32,7 @@ def post(payload: str):
         data=payload.encode(),
         headers={
             "Content-Type": "application/json",
+            "Accept": "application/json",
             "Authorization": f"Bearer {API_KEY}",
         },
         method="POST",

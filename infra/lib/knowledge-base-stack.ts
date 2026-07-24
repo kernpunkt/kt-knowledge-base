@@ -85,12 +85,14 @@ export class KnowledgeBaseStack extends cdk.Stack {
       envName: config.envName,
     });
 
-    // 8. MCP server — Lambda Function URL with API key auth
+    // 8. MCP server — OAuth (Entra ID) + legacy API key
     new McpServer(this, 'McpServer', {
       knowledgeBaseId: knowledgeBase.knowledgeBaseId,
       knowledgeBaseArn: knowledgeBase.knowledgeBaseArn,
       documentBucket: documentBucket.bucket,
       envName: config.envName,
+      entraTenantId: config.entraTenantId,
+      entraClientId: config.entraClientId,
     });
 
     // 9. Monitoring — log groups and alarms

@@ -11,6 +11,10 @@ export interface KbConfig {
   githubOrg: string;
   logRetentionDays: number;
   alarmEmail?: string;
+  /** Azure Entra ID tenant GUID (KB_ENTRA_TENANT_ID) */
+  entraTenantId?: string;
+  /** Entra App Registration client ID (KB_ENTRA_CLIENT_ID) */
+  entraClientId?: string;
 }
 
 export function getConfig(env: Environment): KbConfig {
@@ -22,6 +26,8 @@ export function getConfig(env: Environment): KbConfig {
     region: 'eu-central-1',
     githubOrg: 'kernpunkt',
     alarmEmail: process.env['KB_ALARM_EMAIL'],
+    entraTenantId: process.env['KB_ENTRA_TENANT_ID'],
+    entraClientId: process.env['KB_ENTRA_CLIENT_ID'],
   };
 
   if (env === 'dev') {
