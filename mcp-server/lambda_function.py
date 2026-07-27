@@ -10,6 +10,10 @@ REGION = os.environ.get("AWS_REGION", "eu-central-1")
 ENTRA_TENANT_ID = os.environ.get("ENTRA_TENANT_ID", "")
 ENTRA_CLIENT_ID = os.environ.get("ENTRA_CLIENT_ID", "")
 ENTRA_ISSUER = f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}/v2.0"
+# Entra issues v1 access tokens (iss = sts.windows.net) unless the resource app's
+# requestedAccessTokenVersion is 2. Accept both so token-version config can't break us.
+ENTRA_ISSUER_V1 = f"https://sts.windows.net/{ENTRA_TENANT_ID}/"
+ENTRA_VALID_ISSUERS = {ENTRA_ISSUER, ENTRA_ISSUER_V1}
 ENTRA_JWKS_URL = f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}/discovery/v2.0/keys"
 
 # Canonical public URL of this server (custom domain in front of the Function URL).
@@ -42,40 +46,63 @@ def _get_api_key():
     return secrets.get_secret_value(SecretId=os.environ["API_KEY_SECRET_ARN"])["SecretString"]
 
 
+def _log_rejected_token(token, err):
+    """Decode without verification to log why Entra's token was rejected (no secrets)."""
+    try:
+        from jwt import decode as jwt_decode
+        c = jwt_decode(token, options={"verify_signature": False})
+        print(f"[auth] JWT verify failed: {err!r} | iss={c.get('iss')} "
+              f"aud={c.get('aud')} scp={c.get('scp')} roles={c.get('roles')} "
+              f"ver={c.get('ver')} appid={c.get('appid')}")
+    except Exception as e2:
+        print(f"[auth] JWT undecodable: {err!r} / {e2!r}")
+
+
 def _validate_jwt(token: str) -> bool:
     if not ENTRA_TENANT_ID or not ENTRA_CLIENT_ID:
         return False
+    from jwt import decode as jwt_decode
     try:
-        from jwt import decode as jwt_decode
-        from jwt.exceptions import InvalidTokenError
         signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
         payload = jwt_decode(
             token,
             signing_key.key,
             algorithms=["RS256"],
-            issuer=ENTRA_ISSUER,
-            options={"verify_aud": False},  # aud can be client-id or api://<client-id>
+            # Verify iss/aud manually below so we can accept v1+v2 issuers and log mismatches.
+            options={"verify_aud": False, "verify_iss": False},
         )
-        aud = payload.get("aud", "")
-        if isinstance(aud, str):
-            aud = [aud]
-        # Entra sets aud to the Application ID URI. With a custom domain that is the
-        # full server URL; without one we fall back to the client-id forms.
-        if MCP_PUBLIC_URL:
-            valid_audiences = {MCP_PUBLIC_URL, f"{MCP_PUBLIC_URL}/"}
-        else:
-            valid_audiences = {ENTRA_CLIENT_ID, f"api://{ENTRA_CLIENT_ID}"}
-        if not valid_audiences.intersection(set(aud)):
-            return False
-        # Require a delegated user token: it carries the `scp` claim with our
-        # delegated scope. App-only (client_credentials) tokens carry `roles` and
-        # no `scp`, so this rejects them even if the client secret is leaked —
-        # every accepted request is tied to an interactive Entra user login.
-        scopes = payload.get("scp", "")
-        scopes = scopes.split() if isinstance(scopes, str) else list(scopes)
-        return REQUIRED_SCOPE in scopes
-    except Exception:
+    except Exception as e:
+        _log_rejected_token(token, e)
         return False
+
+    if payload.get("iss") not in ENTRA_VALID_ISSUERS:
+        print(f"[auth] iss mismatch: got {payload.get('iss')!r}, expected one of {ENTRA_VALID_ISSUERS}")
+        return False
+
+    aud = payload.get("aud", "")
+    if isinstance(aud, str):
+        aud = [aud]
+    # Entra sets aud to the Application ID URI. With a custom domain that is the
+    # full server URL; without one we fall back to the client-id forms.
+    if MCP_PUBLIC_URL:
+        valid_audiences = {MCP_PUBLIC_URL, f"{MCP_PUBLIC_URL}/"}
+    else:
+        valid_audiences = {ENTRA_CLIENT_ID, f"api://{ENTRA_CLIENT_ID}"}
+    if not valid_audiences.intersection(set(aud)):
+        print(f"[auth] aud mismatch: got {aud}, expected one of {valid_audiences}")
+        return False
+
+    # Require a delegated user token: it carries the `scp` claim with our delegated
+    # scope. App-only (client_credentials) tokens carry `roles` and no `scp`, so this
+    # rejects them even if the client secret leaks — every accepted request is tied
+    # to an interactive Entra user login.
+    scopes = payload.get("scp", "")
+    scopes = scopes.split() if isinstance(scopes, str) else list(scopes)
+    if REQUIRED_SCOPE not in scopes:
+        print(f"[auth] scope missing: scp={payload.get('scp')} roles={payload.get('roles')}")
+        return False
+
+    return True
 
 
 def _validate_token(token: str) -> bool:
