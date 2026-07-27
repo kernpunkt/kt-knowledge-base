@@ -93,6 +93,8 @@ export class KnowledgeBaseStack extends cdk.Stack {
       envName: config.envName,
       entraTenantId: config.entraTenantId,
       entraClientId: config.entraClientId,
+      domainName: config.mcpDomainName,
+      certificateArn: config.mcpCertificateArn,
     });
 
     // 9. Monitoring — log groups and alarms

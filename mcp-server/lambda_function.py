@@ -12,6 +12,11 @@ ENTRA_CLIENT_ID = os.environ.get("ENTRA_CLIENT_ID", "")
 ENTRA_ISSUER = f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}/v2.0"
 ENTRA_JWKS_URL = f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}/discovery/v2.0/keys"
 
+# Canonical public URL of this server (custom domain in front of the Function URL).
+# Entra issues tokens with aud = the Application ID URI, which must be this URL, and
+# Claude sends it as the RFC 8707 `resource`. Falls back to the request host when unset.
+MCP_PUBLIC_URL = os.environ.get("MCP_PUBLIC_URL", "").rstrip("/")
+
 bedrock = boto3.client("bedrock-agent-runtime", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
 secrets = boto3.client("secretsmanager", region_name=REGION)
@@ -50,7 +55,12 @@ def _validate_jwt(token: str) -> bool:
         aud = payload.get("aud", "")
         if isinstance(aud, str):
             aud = [aud]
-        valid_audiences = {ENTRA_CLIENT_ID, f"api://{ENTRA_CLIENT_ID}"}
+        # Entra sets aud to the Application ID URI. With a custom domain that is the
+        # full server URL; without one we fall back to the client-id forms.
+        if MCP_PUBLIC_URL:
+            valid_audiences = {MCP_PUBLIC_URL, f"{MCP_PUBLIC_URL}/"}
+        else:
+            valid_audiences = {ENTRA_CLIENT_ID, f"api://{ENTRA_CLIENT_ID}"}
         return bool(valid_audiences.intersection(set(aud)))
     except Exception:
         return False
@@ -245,8 +255,11 @@ def _respond(event, msg_id, result):
 
 
 def _resource_url(event):
+    # Canonical resource per RFC 8707: lowercase scheme+host, no trailing slash.
+    if MCP_PUBLIC_URL:
+        return MCP_PUBLIC_URL
     domain = event.get("requestContext", {}).get("domainName", "")
-    return f"https://{domain}/"
+    return f"https://{domain}"
 
 
 def handler(event, context):
@@ -260,11 +273,14 @@ def handler(event, context):
             # OAuth not configured — don't advertise a broken authorization server
             return {"statusCode": 404, "body": "Not Found"}
         resource = _resource_url(event)
+        # Scope is defined under the Entra Application ID URI. With a custom domain the
+        # App ID URI is the server URL, so the full scope value is <resource>/access_as_user.
+        scope_prefix = MCP_PUBLIC_URL or f"api://{ENTRA_CLIENT_ID}"
         metadata = {
             "resource": resource,
             "authorization_servers": [ENTRA_ISSUER],
             "bearer_methods_supported": ["header"],
-            "scopes_supported": [f"api://{ENTRA_CLIENT_ID}/access_as_user"],
+            "scopes_supported": [f"{scope_prefix}/access_as_user"],
         }
         return {
             "statusCode": 200,
@@ -280,11 +296,13 @@ def handler(event, context):
     token = headers.get("authorization", "").removeprefix("Bearer ").strip()
     if not token or not _validate_token(token):
         resource = _resource_url(event)
+        metadata_url = f"{resource}/.well-known/oauth-protected-resource"
         return {
             "statusCode": 401,
             "headers": {
                 "Content-Type": "application/json",
-                "WWW-Authenticate": f'Bearer realm="{resource}", error="invalid_token"',
+                # Point Claude at the protected-resource metadata to start the OAuth flow.
+                "WWW-Authenticate": f'Bearer resource_metadata="{metadata_url}", error="invalid_token"',
             },
             "body": json.dumps({"error": "Unauthorized"}),
         }

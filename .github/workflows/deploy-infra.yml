@@ -82,6 +82,10 @@ jobs:
           KB_DEV_ACCOUNT: ${{ vars.KB_DEV_ACCOUNT }}
           KB_PROD_ACCOUNT: ${{ vars.KB_PROD_ACCOUNT }}
           KB_ALARM_EMAIL: ${{ vars.KB_ALARM_EMAIL }}
+          KB_ENTRA_TENANT_ID: ${{ vars.KB_ENTRA_TENANT_ID }}
+          KB_ENTRA_CLIENT_ID: ${{ vars.KB_ENTRA_CLIENT_ID }}
+          KB_MCP_DOMAIN: ${{ vars.KB_MCP_DOMAIN }}
+          KB_MCP_CERT_ARN: ${{ vars.KB_MCP_CERT_ARN }}
 
       - name: CDK Diff (dev)
         run: npx cdk diff KernpunktKbDev
@@ -89,6 +93,10 @@ jobs:
         env:
           KB_DEV_ACCOUNT: ${{ vars.KB_DEV_ACCOUNT }}
           KB_PROD_ACCOUNT: ${{ vars.KB_PROD_ACCOUNT }}
+          KB_ENTRA_TENANT_ID: ${{ vars.KB_ENTRA_TENANT_ID }}
+          KB_ENTRA_CLIENT_ID: ${{ vars.KB_ENTRA_CLIENT_ID }}
+          KB_MCP_DOMAIN: ${{ vars.KB_MCP_DOMAIN }}
+          KB_MCP_CERT_ARN: ${{ vars.KB_MCP_CERT_ARN }}
 
   # ── Deploy Dev (auto on push to main) ──────────────────────────────────────
   deploy-dev:
@@ -124,6 +132,10 @@ jobs:
           KB_DEV_ACCOUNT: ${{ vars.KB_DEV_ACCOUNT }}
           KB_PROD_ACCOUNT: ${{ vars.KB_PROD_ACCOUNT }}
           KB_ALARM_EMAIL: ${{ vars.KB_ALARM_EMAIL }}
+          KB_ENTRA_TENANT_ID: ${{ vars.KB_ENTRA_TENANT_ID }}
+          KB_ENTRA_CLIENT_ID: ${{ vars.KB_ENTRA_CLIENT_ID }}
+          KB_MCP_DOMAIN: ${{ vars.KB_MCP_DOMAIN }}
+          KB_MCP_CERT_ARN: ${{ vars.KB_MCP_CERT_ARN }}
 
   # ── Deploy Production (manual only) ────────────────────────────────────────
   deploy-production:

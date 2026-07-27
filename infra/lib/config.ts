@@ -15,6 +15,11 @@ export interface KbConfig {
   entraTenantId?: string;
   /** Entra App Registration client ID (KB_ENTRA_CLIENT_ID) */
   entraClientId?: string;
+  /** Custom domain for the MCP server, e.g. kb-mcp.kernpunkt.de (KB_MCP_DOMAIN).
+   *  Required for Entra OAuth: the App ID URI must live on a verified domain. */
+  mcpDomainName?: string;
+  /** ACM certificate ARN for mcpDomainName — MUST be in us-east-1 for CloudFront (KB_MCP_CERT_ARN) */
+  mcpCertificateArn?: string;
 }
 
 export function getConfig(env: Environment): KbConfig {
@@ -28,6 +33,8 @@ export function getConfig(env: Environment): KbConfig {
     alarmEmail: process.env['KB_ALARM_EMAIL'],
     entraTenantId: process.env['KB_ENTRA_TENANT_ID'],
     entraClientId: process.env['KB_ENTRA_CLIENT_ID'],
+    mcpDomainName: process.env['KB_MCP_DOMAIN'],
+    mcpCertificateArn: process.env['KB_MCP_CERT_ARN'],
   };
 
   if (env === 'dev') {
