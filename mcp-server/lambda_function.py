@@ -17,6 +17,10 @@ ENTRA_JWKS_URL = f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}/discovery
 # Claude sends it as the RFC 8707 `resource`. Falls back to the request host when unset.
 MCP_PUBLIC_URL = os.environ.get("MCP_PUBLIC_URL", "").rstrip("/")
 
+# Delegated scope defined on the Entra app (Expose an API → access_as_user). A valid
+# access token must carry this in `scp`, which only delegated user tokens have.
+REQUIRED_SCOPE = "access_as_user"
+
 bedrock = boto3.client("bedrock-agent-runtime", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
 secrets = boto3.client("secretsmanager", region_name=REGION)
@@ -61,7 +65,15 @@ def _validate_jwt(token: str) -> bool:
             valid_audiences = {MCP_PUBLIC_URL, f"{MCP_PUBLIC_URL}/"}
         else:
             valid_audiences = {ENTRA_CLIENT_ID, f"api://{ENTRA_CLIENT_ID}"}
-        return bool(valid_audiences.intersection(set(aud)))
+        if not valid_audiences.intersection(set(aud)):
+            return False
+        # Require a delegated user token: it carries the `scp` claim with our
+        # delegated scope. App-only (client_credentials) tokens carry `roles` and
+        # no `scp`, so this rejects them even if the client secret is leaked —
+        # every accepted request is tied to an interactive Entra user login.
+        scopes = payload.get("scp", "")
+        scopes = scopes.split() if isinstance(scopes, str) else list(scopes)
+        return REQUIRED_SCOPE in scopes
     except Exception:
         return False
 
