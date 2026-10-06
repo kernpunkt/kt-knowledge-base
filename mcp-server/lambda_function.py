@@ -3,6 +3,8 @@ import os
 import functools
 import boto3
 
+import oauth_proxy
+
 KB_ID = os.environ["KNOWLEDGE_BASE_ID"]
 S3_BUCKET = os.environ["S3_BUCKET_NAME"]
 REGION = os.environ.get("AWS_REGION", "eu-central-1")
@@ -106,7 +108,9 @@ def _validate_jwt(token: str) -> bool:
 
 
 def _validate_token(token: str) -> bool:
-    """Accept a valid Entra ID JWT or the legacy API key."""
+    """Accept a token from our OAuth proxy, a valid Entra ID JWT or the legacy API key."""
+    if oauth_proxy.validate_access_token(token):
+        return True
     if _validate_jwt(token):
         return True
     return bool(token and token == _get_api_key())
@@ -312,20 +316,30 @@ def handler(event, context):
             # OAuth not configured — don't advertise a broken authorization server
             return {"statusCode": 404, "body": "Not Found"}
         resource = _resource_url(event)
-        # Scope is defined under the Entra Application ID URI. With a custom domain the
-        # App ID URI is the server URL, so the full scope value is <resource>/access_as_user.
-        scope_prefix = MCP_PUBLIC_URL or f"api://{ENTRA_CLIENT_ID}"
+        if oauth_proxy.enabled():
+            # We are the authorization server (DCR + consent page, Entra behind us).
+            authorization_server = MCP_PUBLIC_URL
+            scope = oauth_proxy.SCOPE
+        else:
+            # Scope is defined under the Entra Application ID URI. With a custom domain the
+            # App ID URI is the server URL, so the full scope value is <resource>/access_as_user.
+            authorization_server = ENTRA_ISSUER
+            scope = f"{MCP_PUBLIC_URL or f'api://{ENTRA_CLIENT_ID}'}/access_as_user"
         metadata = {
             "resource": resource,
-            "authorization_servers": [ENTRA_ISSUER],
+            "authorization_servers": [authorization_server],
             "bearer_methods_supported": ["header"],
-            "scopes_supported": [f"{scope_prefix}/access_as_user"],
+            "scopes_supported": [scope],
         }
         return {
             "statusCode": 200,
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps(metadata),
         }
+
+    oauth_response = oauth_proxy.handle(event, method, path)
+    if oauth_response is not None:
+        return oauth_response
 
     if method != "POST":
         return {"statusCode": 405, "body": "Method Not Allowed"}

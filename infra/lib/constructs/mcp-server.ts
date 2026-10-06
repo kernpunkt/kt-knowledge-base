@@ -6,6 +6,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import { Construct } from 'constructs';
 
 export interface McpServerProps {
@@ -49,11 +50,43 @@ export class McpServer extends Construct {
     // Canonical public URL — used for the OAuth resource, aud check and advertised scope.
     if (props.domainName) env['MCP_PUBLIC_URL'] = `https://${props.domainName}`;
 
+    // OAuth proxy (DCR + consent page in front of Entra) — needs Entra and the custom
+    // domain, because Entra redirects back to https://<domain>/oauth/callback.
+    // It stays dormant until the Entra client secret below is set by hand.
+    const oauthProxy = props.entraTenantId && props.entraClientId && props.domainName;
+    let oauthTable: dynamodb.Table | undefined;
+    let entraClientSecret: secretsmanager.Secret | undefined;
+    let signingKey: secretsmanager.Secret | undefined;
+    if (oauthProxy) {
+      // Registered clients, pending logins, one-time codes, refresh tokens — all short-lived
+      // except clients, so losing the table only forces clients to re-register.
+      oauthTable = new dynamodb.Table(this, 'OAuthTable', {
+        partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+        billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+        timeToLiveAttribute: 'ttl',
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+      entraClientSecret = new secretsmanager.Secret(this, 'EntraClientSecret', {
+        secretName: `KernpunktKbMcpEntraClientSecret-${props.envName}`,
+        description: 'Client secret of the Entra app registration. Placeholder CHANGE_ME keeps the OAuth proxy disabled.',
+        secretStringValue: cdk.SecretValue.unsafePlainText('CHANGE_ME'),
+      });
+      signingKey = new secretsmanager.Secret(this, 'OAuthSigningKey', {
+        secretName: `KernpunktKbMcpOAuthSigningKey-${props.envName}`,
+        description: 'HMAC key for access tokens issued by the MCP OAuth proxy',
+        generateSecretString: { excludePunctuation: true, passwordLength: 64 },
+      });
+      env['OAUTH_TABLE_NAME'] = oauthTable.tableName;
+      env['ENTRA_CLIENT_SECRET_ARN'] = entraClientSecret.secretArn;
+      env['OAUTH_SIGNING_KEY_SECRET_ARN'] = signingKey.secretArn;
+    }
+
     const fn = new lambda.Function(this, 'Function', {
       functionName: `KernpunktKbMcp-${props.envName}`,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'lambda_function.handler',
       code: lambda.Code.fromAsset('../mcp-server', {
+        exclude: ['tests', '__pycache__', '.pytest_cache'],
         bundling: {
           // Installs PyJWT[crypto] into the deployment zip (requires Docker at synth/deploy time)
           image: lambda.Runtime.PYTHON_3_12.bundlingImage,
@@ -69,6 +102,9 @@ export class McpServer extends Construct {
     });
 
     apiKeySecret.grantRead(fn);
+    oauthTable?.grantReadWriteData(fn);
+    entraClientSecret?.grantRead(fn);
+    signingKey?.grantRead(fn);
 
     fn.addToRolePolicy(new iam.PolicyStatement({
       sid: 'BedrockRetrieve',
@@ -115,6 +151,22 @@ export class McpServer extends Construct {
     // The Function URL uses AuthType NONE and the Lambda enforces its own Bearer auth,
     // so no OAC/SigV4 signing is needed between CloudFront and the origin.
     if (props.domainName && props.certificateArn) {
+      // Function URLs rename WWW-Authenticate to x-amzn-remapped-www-authenticate, which
+      // hides the OAuth discovery hint in our 401s from MCP clients. Rename it back.
+      const restoreWwwAuthenticate = new cloudfront.Function(this, 'RestoreWwwAuthenticate', {
+        runtime: cloudfront.FunctionRuntime.JS_2_0,
+        code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var headers = event.response.headers;
+  var remapped = headers['x-amzn-remapped-www-authenticate'];
+  if (remapped) {
+    headers['www-authenticate'] = remapped;
+    delete headers['x-amzn-remapped-www-authenticate'];
+  }
+  return event.response;
+}`),
+      });
+
       const distribution = new cloudfront.Distribution(this, 'Distribution', {
         comment: `MCP server ${props.envName} (${props.domainName})`,
         domainNames: [props.domainName],
@@ -127,6 +179,10 @@ export class McpServer extends Construct {
           // rejects a mismatched Host) — including the Authorization header.
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
           originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          functionAssociations: [{
+            function: restoreWwwAuthenticate,
+            eventType: cloudfront.FunctionEventType.VIEWER_RESPONSE,
+          }],
         },
       });
 
@@ -140,6 +196,14 @@ export class McpServer extends Construct {
         value: distribution.distributionDomainName,
         description: 'CloudFront domain — create a CNAME: <domainName> -> this value',
         exportName: `KernpunktKb-${props.envName}-McpDistributionDomain`,
+      });
+    }
+
+    if (entraClientSecret) {
+      new cdk.CfnOutput(scope, 'McpEntraClientSecretArn', {
+        value: entraClientSecret.secretArn,
+        description: 'Set the Entra client secret here to enable the OAuth proxy: aws secretsmanager put-secret-value --secret-id <arn> --secret-string <value>',
+        exportName: `KernpunktKb-${props.envName}-McpEntraClientSecretArn`,
       });
     }
 

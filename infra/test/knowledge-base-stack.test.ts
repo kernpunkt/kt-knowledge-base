@@ -15,11 +15,12 @@ const testConfig: KbConfig = {
   logRetentionDays: 30,
 };
 
-function buildStack(): Template {
-  const app = new cdk.App();
+function buildStack(overrides: Partial<KbConfig> = {}): Template {
+  // Skip Docker bundling of the Lambda asset — the assertions don't need it.
+  const app = new cdk.App({ context: { 'aws:cdk:bundling-stacks': [] } });
   const stack = new KnowledgeBaseStack(app, 'TestStack', {
     env: { account: testConfig.account, region: testConfig.region },
-    config: testConfig,
+    config: { ...testConfig, ...overrides },
   });
   return Template.fromStack(stack);
 }
@@ -281,6 +282,59 @@ describe('KnowledgeBaseStack', () => {
           ExcludePunctuation: true,
           PasswordLength: 32,
         },
+      });
+    });
+
+    test('no OAuth proxy resources without Entra + custom domain', () => {
+      template.resourceCountIs('AWS::DynamoDB::Table', 0);
+    });
+  });
+
+  describe('MCP OAuth proxy', () => {
+    let proxyTemplate: Template;
+
+    beforeAll(() => {
+      proxyTemplate = buildStack({
+        entraTenantId: 'tenant-1',
+        entraClientId: 'client-1',
+        mcpDomainName: 'kb-mcp.example.com',
+        mcpCertificateArn: 'arn:aws:acm:us-east-1:123456789012:certificate/abc',
+      });
+    });
+
+    test('state table has TTL', () => {
+      proxyTemplate.hasResourceProperties('AWS::DynamoDB::Table', {
+        TimeToLiveSpecification: { AttributeName: 'ttl', Enabled: true },
+      });
+    });
+
+    test('Entra client secret starts as placeholder so the proxy stays dormant', () => {
+      proxyTemplate.hasResourceProperties('AWS::SecretsManager::Secret', {
+        Name: 'KernpunktKbMcpEntraClientSecret-dev',
+        SecretString: 'CHANGE_ME',
+      });
+    });
+
+    test('Lambda gets proxy configuration', () => {
+      proxyTemplate.hasResourceProperties('AWS::Lambda::Function', {
+        Environment: {
+          Variables: Match.objectLike({
+            MCP_PUBLIC_URL: 'https://kb-mcp.example.com',
+            OAUTH_TABLE_NAME: Match.anyValue(),
+            ENTRA_CLIENT_SECRET_ARN: Match.anyValue(),
+            OAUTH_SIGNING_KEY_SECRET_ARN: Match.anyValue(),
+          }),
+        },
+      });
+    });
+
+    test('CloudFront restores the WWW-Authenticate header', () => {
+      proxyTemplate.hasResourceProperties('AWS::CloudFront::Distribution', {
+        DistributionConfig: Match.objectLike({
+          DefaultCacheBehavior: Match.objectLike({
+            FunctionAssociations: [Match.objectLike({ EventType: 'viewer-response' })],
+          }),
+        }),
       });
     });
   });
