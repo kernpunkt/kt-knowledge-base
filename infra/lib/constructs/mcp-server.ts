@@ -151,22 +151,6 @@ export class McpServer extends Construct {
     // The Function URL uses AuthType NONE and the Lambda enforces its own Bearer auth,
     // so no OAC/SigV4 signing is needed between CloudFront and the origin.
     if (props.domainName && props.certificateArn) {
-      // Function URLs rename WWW-Authenticate to x-amzn-remapped-www-authenticate, which
-      // hides the OAuth discovery hint in our 401s from MCP clients. Rename it back.
-      const restoreWwwAuthenticate = new cloudfront.Function(this, 'RestoreWwwAuthenticate', {
-        runtime: cloudfront.FunctionRuntime.JS_2_0,
-        code: cloudfront.FunctionCode.fromInline(`
-function handler(event) {
-  var headers = event.response.headers;
-  var remapped = headers['x-amzn-remapped-www-authenticate'];
-  if (remapped) {
-    headers['www-authenticate'] = remapped;
-    delete headers['x-amzn-remapped-www-authenticate'];
-  }
-  return event.response;
-}`),
-      });
-
       const distribution = new cloudfront.Distribution(this, 'Distribution', {
         comment: `MCP server ${props.envName} (${props.domainName})`,
         domainNames: [props.domainName],
@@ -179,10 +163,6 @@ function handler(event) {
           // rejects a mismatched Host) — including the Authorization header.
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
           originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
-          functionAssociations: [{
-            function: restoreWwwAuthenticate,
-            eventType: cloudfront.FunctionEventType.VIEWER_RESPONSE,
-          }],
         },
       });
 
