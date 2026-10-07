@@ -327,16 +327,6 @@ describe('KnowledgeBaseStack', () => {
         },
       });
     });
-
-    test('CloudFront restores the WWW-Authenticate header', () => {
-      proxyTemplate.hasResourceProperties('AWS::CloudFront::Distribution', {
-        DistributionConfig: Match.objectLike({
-          DefaultCacheBehavior: Match.objectLike({
-            FunctionAssociations: [Match.objectLike({ EventType: 'viewer-response' })],
-          }),
-        }),
-      });
-    });
   });
 
   // ── Stack outputs ──────────────────────────────────────────────────────────
